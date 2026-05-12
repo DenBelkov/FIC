@@ -1,41 +1,52 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 
-def company_popularity(data):  # Популярность компании
-    return data.groupby('client_name').size()
+DATA_DIR = Path("../data")
+RATE_PATH = Path("data/company_rate.csv")
+CLIENTS_PATH = DATA_DIR / "client_dataset.json"
 
 
-def staff_turnover(data):  # Текучка кадров
-    return data[data.grade_proof == 'подтверждён'].groupby('client_name').size()
+def company_popularity(df: pd.DataFrame) -> pd.Series:
+    return df.groupby("client_name").size().rename("company_popularity")
 
 
-def competition_ratio(data):
-    competition = data.groupby(['client_name', 'position']).size()
-    confirmed_count = data[data['grade_proof'] == 'подтверждён'].groupby(['client_name', 'position']).size()
-    competition_df = competition.to_frame(name='total_applicants').join(
-        confirmed_count.to_frame(name='confirmed_applicants'), how='left'
+def staff_turnover(df: pd.DataFrame) -> pd.Series:
+    mask = df["grade_proof"].eq("подтверждён")
+    return df.loc[mask].groupby("client_name").size().rename("staff_turnover")
+
+
+def competition_ratio(df: pd.DataFrame) -> pd.DataFrame:
+    total = df.groupby(["client_name", "position"]).size().rename("total_applicants")
+    confirmed = (
+        df.loc[df["grade_proof"].eq("подтверждён")]
+        .groupby(["client_name", "position"])
+        .size()
+        .rename("confirmed_applicants")
     )
-    competition_df['confirmed_applicants'] = competition_df['confirmed_applicants'].fillna(0)  # Заполнить NaN нулями
-    competition_df['competition_ratio'] = competition_df['total_applicants'] / competition_df['confirmed_applicants']
-    competition_df['competition_ratio'].replace(np.inf, np.nan,
-                                                inplace=True)  # Убрать бесконечности (если нет подтверждённых)
 
-    # competition_df[competition_df.competition_ratio != np.nan]
-    return competition_df
-
-
-def company_rates(df):
-    info = pd.read_csv('data/company_rate.csv')
-    df = pd.merge(df, info, on='client_name', how='inner')
-    return df
+    result = total.to_frame().join(confirmed, how="left")
+    result["confirmed_applicants"] = result["confirmed_applicants"].fillna(0)
+    result["competition_ratio"] = result["total_applicants"].div(
+        result["confirmed_applicants"].replace(0, np.nan)
+    )
+    return result
 
 
-if __name__ == '__main__':
-    with open('../data/client_dataset.json', 'r', encoding='utf-8') as file:
-        data = json.load(file)
+def company_rates(df: pd.DataFrame, rate_path: Path = RATE_PATH) -> pd.DataFrame:
+    rates = pd.read_csv(rate_path)
+    return df.merge(rates, on="client_name", how="inner")
 
-    df = company_rates(pd.DataFrame(data))
+
+def load_clients(path: Path = CLIENTS_PATH) -> pd.DataFrame:
+    with path.open("r", encoding="utf-8") as f:
+        return pd.DataFrame(json.load(f))
+
+
+if __name__ == "__main__":
+    df = load_clients()
+    df = company_rates(df)
     print(df.head(10))
